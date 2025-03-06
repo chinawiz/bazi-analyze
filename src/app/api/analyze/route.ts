@@ -14,8 +14,17 @@ function createOpenAIClient() {
   return new OpenAI({
     apiKey: apiKey,
     baseURL: baseURL || 'https://api.openai.com/v1',
+    timeout: 30000, // 30秒超时
+    maxRetries: 3, // 最多重试3次
   });
 }
+
+// 设置响应超时
+export const maxDuration = 60; // Vercel Edge Function 最大执行时间设为60秒
+
+// 设置响应配置
+export const runtime = 'edge'; // 使用边缘运行时
+export const preferredRegion = 'hkg1'; // 使用香港节点
 
 export async function POST(request: Request) {
   try {
@@ -94,15 +103,25 @@ export async function POST(request: Request) {
       };
       console.log('API响应:', response);
       
-      return NextResponse.json(response);
+      return new NextResponse(JSON.stringify(response), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, no-cache'
+        }
+      });
     } catch (error) {
       console.error('OpenAI API调用出错:', error);
+      // 检查是否是超时错误
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT');
+      
       return NextResponse.json(
         { 
-          error: 'AI服务调用失败',
-          details: error instanceof Error ? error.message : String(error)
+          error: isTimeout ? 'API请求超时，请稍后重试' : 'AI服务调用失败',
+          details: errorMessage
         },
-        { status: 500 }
+        { status: isTimeout ? 504 : 500 }
       );
     }
   } catch (error) {

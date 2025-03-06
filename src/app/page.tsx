@@ -9,6 +9,30 @@ interface UsageInfo {
   total_tokens?: number;
 }
 
+// 定义请求超时时间
+const FETCH_TIMEOUT = 60000; // 60秒
+
+// 带超时的fetch函数
+async function fetchWithTimeout(url: string, options: RequestInit, timeout: number) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('请求超时，请稍后重试');
+    }
+    throw error;
+  }
+}
+
 export default function Home() {
   // 状态管理
   const [gender, setGender] = useState<string>('男');
@@ -30,7 +54,7 @@ export default function Home() {
     try {
       console.log('发送请求数据:', { gender, birthplace, birthdate });
       
-      const response = await fetch('/api/analyze', {
+      const response = await fetchWithTimeout('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -40,7 +64,7 @@ export default function Home() {
           birthplace,
           birthdate,
         }),
-      });
+      }, FETCH_TIMEOUT);
 
       console.log('服务器响应状态:', response.status);
       
@@ -55,6 +79,9 @@ export default function Home() {
       }
 
       if (!response.ok) {
+        if (response.status === 504) {
+          throw new Error('服务器响应超时，请稍后重试');
+        }
         throw new Error(data.error || data.details || `请求失败 (${response.status})`);
       }
 
