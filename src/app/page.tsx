@@ -10,7 +10,7 @@ interface UsageInfo {
 }
 
 // 定义请求超时时间
-const FETCH_TIMEOUT = 60000; // 60秒
+const FETCH_TIMEOUT = 30000; // 减少到30秒
 
 // 带超时的fetch函数
 async function fetchWithTimeout(url: string, options: RequestInit, timeout: number) {

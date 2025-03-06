@@ -14,13 +14,13 @@ function createOpenAIClient() {
   return new OpenAI({
     apiKey: apiKey,
     baseURL: baseURL || 'https://api.openai.com/v1',
-    timeout: 30000, // 30秒超时
-    maxRetries: 3, // 最多重试3次
+    timeout: 25000, // 减少到25秒超时
+    maxRetries: 2, // 减少到2次重试
   });
 }
 
 // 设置响应超时
-export const maxDuration = 60; // Vercel Edge Function 最大执行时间设为60秒
+export const maxDuration = 30; // 减少到30秒
 
 // 设置响应配置
 export const runtime = 'edge'; // 使用边缘运行时
@@ -68,21 +68,23 @@ export async function POST(request: Request) {
     }
 
     // 构建提示词
-    const prompt = `
-      请根据以下信息进行八字分析：
-      性别：${gender}
-      出生地：${birthplace}
-      生辰八字：${birthdate}
-      
-      请提供详细的命理分析，包括五行属性、命运走向、事业财运、婚姻感情等方面的解读。
-    `;
+    const prompt = `简要分析：
+性别：${gender}
+出生地：${birthplace}
+生辰八字：${birthdate}
+
+请提供简明的八字分析，包括：
+1. 五行属性
+2. 主要命运特征
+3. 事业发展建议
+4. 感情婚姻概述`;
 
     console.log('使用的模型:', process.env.OPENAI_API_MODEL || "gpt-3.5-turbo");
-    console.log('最大Token数:', process.env.OPENAI_MAX_TOKENS || "2000");
+    console.log('最大Token数:', process.env.OPENAI_MAX_TOKENS || "1000");
 
     // 准备消息数组
     const messages: ChatCompletionMessageParam[] = [
-      { role: "system", content: "你是一位精通命理学和八字分析的专家。" },
+      { role: "system", content: "你是一位专业的命理分析师，请简明扼要地回答。" },
       { role: "user", content: prompt }
     ];
 
@@ -93,7 +95,9 @@ export async function POST(request: Request) {
         model: process.env.OPENAI_API_MODEL || "gpt-3.5-turbo",
         messages: messages,
         temperature: 0.7,
-        max_tokens: parseInt(process.env.OPENAI_MAX_TOKENS || "2000"),
+        max_tokens: 1000, // 减少token数量
+        presence_penalty: 0.1,
+        frequency_penalty: 0.1,
       });
       console.log('OpenAI API调用成功');
 
