@@ -1,6 +1,31 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { Stream } from 'openai/streaming';
+import { ChatCompletionChunk } from 'openai/resources/chat/completions';
+
+// 重试函数
+async function retryOperation<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 3,
+  delay: number = 30000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      console.log(`操作失败，第 ${i + 1} 次重试`);
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error('操作失败');
+}
 
 // 创建OpenAI客户端实例的函数
 function createOpenAIClient() {
@@ -14,7 +39,7 @@ function createOpenAIClient() {
   return new OpenAI({
     apiKey: apiKey,
     baseURL: baseURL || 'https://api.openai.com/v1',
-    timeout: 30000, // 减少超时时间
+    timeout: 30000,
     maxRetries: 2,
   });
 }
@@ -25,6 +50,20 @@ export const maxDuration = 60;
 // 设置响应配置
 export const runtime = 'edge';
 export const preferredRegion = 'hkg1';
+
+// 处理OpenAI API请求的函数
+async function processOpenAIRequest(messages: ChatCompletionMessageParam[]) {
+  const openai = createOpenAIClient();
+  return openai.chat.completions.create({
+    model: process.env.OPENAI_API_MODEL || "gpt-3.5-turbo",
+    messages: messages,
+    temperature: 0.7,
+    max_tokens: 1500,
+    presence_penalty: 0.1,
+    frequency_penalty: 0.1,
+    stream: true,
+  });
+}
 
 export async function POST(request: Request) {
   const encoder = new TextEncoder();
@@ -53,19 +92,6 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: '请提供性别、出生地和生辰八字' },
         { status: 400 }
-      );
-    }
-
-    // 创建OpenAI客户端
-    let openai;
-    try {
-      openai = createOpenAIClient();
-      console.log('OpenAI客户端创建成功');
-    } catch (error) {
-      console.error('创建OpenAI客户端失败:', error);
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : '配置错误' },
-        { status: 500 }
       );
     }
 
@@ -141,44 +167,57 @@ export async function POST(request: Request) {
       { role: "user", content: prompt }
     ];
 
-    // 创建流式响应
-    const stream = await openai.chat.completions.create({
-      model: process.env.OPENAI_API_MODEL || "gpt-3.5-turbo",
-      messages: messages,
-      temperature: 0.7,
-      max_tokens: 1500,
-      presence_penalty: 0.1,
-      frequency_penalty: 0.1,
-      stream: true, // 启用流式响应
-    });
+    try {
+      // 使用重试机制调用API
+      const stream = await retryOperation(async () => {
+        const openai = createOpenAIClient();
+        return openai.chat.completions.create({
+          model: process.env.OPENAI_API_MODEL || "gpt-3.5-turbo",
+          messages: messages,
+          temperature: 0.7,
+          max_tokens: 1500,
+          presence_penalty: 0.1,
+          frequency_penalty: 0.1,
+          stream: true,
+        });
+      });
 
-    // 创建响应流
-    const readableStream = new ReadableStream({
-      async start(controller) {
-        try {
-          for await (const chunk of stream) {
-            const content = chunk.choices[0]?.delta?.content || '';
-            if (content) {
-              controller.enqueue(encoder.encode(content));
+      // 创建响应流
+      const readableStream = new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const chunk of stream) {
+              const content = chunk.choices[0]?.delta?.content || '';
+              if (content) {
+                controller.enqueue(encoder.encode(content));
+              }
             }
+            controller.close();
+          } catch (error) {
+            console.error('流处理错误:', error);
+            controller.error(error);
           }
-          controller.close();
-        } catch (error) {
-          console.error('流处理错误:', error);
-          controller.error(error);
         }
-      }
-    });
+      });
 
-    // 返回流式响应
-    return new Response(readableStream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
-
+      // 返回流式响应
+      return new Response(readableStream, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    } catch (error) {
+      console.error('API调用失败:', error);
+      return NextResponse.json(
+        { 
+          error: '服务暂时不可用，请稍后重试',
+          details: error instanceof Error ? error.message : String(error)
+        },
+        { status: 503 }
+      );
+    }
   } catch (error) {
     console.error('API处理出错:', error);
     return NextResponse.json(
