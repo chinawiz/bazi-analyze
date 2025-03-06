@@ -28,6 +28,8 @@ export default function Home() {
     setUsageInfo(null);
 
     try {
+      console.log('发送请求数据:', { gender, birthplace, birthdate });
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
@@ -40,15 +42,24 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json().catch(() => {
+      console.log('服务器响应状态:', response.status);
+      
+      let data;
+      try {
+        const text = await response.text();
+        console.log('服务器原始响应:', text);
+        data = JSON.parse(text);
+      } catch (parseError) {
+        console.error('JSON解析错误:', parseError);
         throw new Error('服务器返回的数据格式无效');
-      });
+      }
 
       if (!response.ok) {
-        throw new Error(data.error || data.details || '请求失败');
+        throw new Error(data.error || data.details || `请求失败 (${response.status})`);
       }
 
       if (!data.result) {
+        console.error('无效的响应数据:', data);
         throw new Error('服务器返回的数据缺少分析结果');
       }
 
