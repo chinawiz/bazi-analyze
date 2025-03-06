@@ -14,19 +14,21 @@ function createOpenAIClient() {
   return new OpenAI({
     apiKey: apiKey,
     baseURL: baseURL || 'https://api.openai.com/v1',
-    timeout: 25000, // 减少到25秒超时
-    maxRetries: 2, // 减少到2次重试
+    timeout: 30000, // 减少超时时间
+    maxRetries: 2,
   });
 }
 
 // 设置响应超时
-export const maxDuration = 30; // 减少到30秒
+export const maxDuration = 60;
 
 // 设置响应配置
-export const runtime = 'edge'; // 使用边缘运行时
-export const preferredRegion = 'hkg1'; // 使用香港节点
+export const runtime = 'edge';
+export const preferredRegion = 'hkg1';
 
 export async function POST(request: Request) {
+  const encoder = new TextEncoder();
+  
   try {
     console.log('收到API请求');
     
@@ -68,66 +70,115 @@ export async function POST(request: Request) {
     }
 
     // 构建提示词
-    const prompt = `简要分析：
+    const prompt = `分析八字：
 性别：${gender}
 出生地：${birthplace}
 生辰八字：${birthdate}
 
-请提供简明的八字分析，包括：
-1. 五行属性
-2. 主要命运特征
-3. 事业发展建议
-4. 感情婚姻概述`;
+请提供详细的八字命理分析，按以下格式输出（使用Markdown格式）：
+
+**八字分析总览**
+
+**1. 八字格局**
+- **天干地支五行**
+  年柱：
+  月柱：
+  日柱：
+  时柱：
+  五行分布：
+
+- **日主特征**
+  详细说明日主状态...
+
+- **吉神凶煞**
+  列出主要吉神凶煞...
+
+**2. 性格特征与健康**
+- **性格优势**
+  列出3-4个主要优点...
+
+- **性格短板**
+  列出2-3个需要注意的方面...
+
+- **健康建议**
+  针对性地提供3-4条建议...
+
+**3. 事业与财运**
+- **事业方向**
+  最适合的2-3个行业方向...
+
+- **财运分析**
+  财运特点和走势...
+
+- **发展建议**
+  具体的发展建议和时机...
+
+**4. 姻缘与家庭**
+- **感情特质**
+  个人在感情方面的特点...
+
+- **婚姻分析**
+  婚姻状况和时机...
+
+- **配偶特征**
+  理想配偶的特点...
+
+**未来运势**
+- 近期（1年内）运势重点
+- 中期（3年内）发展方向
+- 长期（5年内）整体趋势
+
+请确保分析专业、准确，并给出实用的建议。`;
 
     console.log('使用的模型:', process.env.OPENAI_API_MODEL || "gpt-3.5-turbo");
-    console.log('最大Token数:', process.env.OPENAI_MAX_TOKENS || "1000");
 
     // 准备消息数组
     const messages: ChatCompletionMessageParam[] = [
-      { role: "system", content: "你是一位专业的命理分析师，请简明扼要地回答。" },
+      { 
+        role: "system", 
+        content: "你是一位精通八字命理的分析师，擅长提供准确、实用、有见地的分析。请用专业但易懂的语言输出分析结果，注重分析的可操作性。" 
+      },
       { role: "user", content: prompt }
     ];
 
-    try {
-      // 调用API
-      console.log('开始调用OpenAI API');
-      const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_API_MODEL || "gpt-3.5-turbo",
-        messages: messages,
-        temperature: 0.7,
-        max_tokens: 1000, // 减少token数量
-        presence_penalty: 0.1,
-        frequency_penalty: 0.1,
-      });
-      console.log('OpenAI API调用成功');
+    // 创建流式响应
+    const stream = await openai.chat.completions.create({
+      model: process.env.OPENAI_API_MODEL || "gpt-3.5-turbo",
+      messages: messages,
+      temperature: 0.7,
+      max_tokens: 1500,
+      presence_penalty: 0.1,
+      frequency_penalty: 0.1,
+      stream: true, // 启用流式响应
+    });
 
-      const response = { 
-        result: completion.choices[0].message.content,
-        usage: completion.usage
-      };
-      console.log('API响应:', response);
-      
-      return new NextResponse(JSON.stringify(response), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store, no-cache'
+    // 创建响应流
+    const readableStream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content || '';
+            if (content) {
+              controller.enqueue(encoder.encode(content));
+            }
+          }
+          controller.close();
+        } catch (error) {
+          console.error('流处理错误:', error);
+          controller.error(error);
         }
-      });
-    } catch (error) {
-      console.error('OpenAI API调用出错:', error);
-      // 检查是否是超时错误
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT');
-      
-      return NextResponse.json(
-        { 
-          error: isTimeout ? 'API请求超时，请稍后重试' : 'AI服务调用失败',
-          details: errorMessage
-        },
-        { status: isTimeout ? 504 : 500 }
-      );
-    }
+      }
+    });
+
+    // 返回流式响应
+    return new Response(readableStream, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+
   } catch (error) {
     console.error('API处理出错:', error);
     return NextResponse.json(

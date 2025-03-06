@@ -2,15 +2,8 @@
 
 import { useState } from 'react';
 
-// 定义使用信息的接口
-interface UsageInfo {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-}
-
 // 定义请求超时时间
-const FETCH_TIMEOUT = 30000; // 减少到30秒
+const FETCH_TIMEOUT = 30000;
 
 // 带超时的fetch函数
 async function fetchWithTimeout(url: string, options: RequestInit, timeout: number) {
@@ -41,7 +34,30 @@ export default function Home() {
   const [result, setResult] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
-  const [usageInfo, setUsageInfo] = useState<UsageInfo | null>(null);
+
+  // 处理流式响应
+  async function handleStream(response: Response) {
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+
+    if (!reader) {
+      throw new Error('无法读取响应流');
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        text += chunk;
+        setResult(text); // 实时更新UI
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
 
   // 提交表单
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,7 +65,6 @@ export default function Home() {
     setLoading(true);
     setError('');
     setResult('');
-    setUsageInfo(null);
 
     try {
       console.log('发送请求数据:', { gender, birthplace, birthdate });
@@ -67,33 +82,15 @@ export default function Home() {
       }, FETCH_TIMEOUT);
 
       console.log('服务器响应状态:', response.status);
-      
-      let data;
-      try {
-        const text = await response.text();
-        console.log('服务器原始响应:', text);
-        data = JSON.parse(text);
-      } catch (parseError) {
-        console.error('JSON解析错误:', parseError);
-        throw new Error('服务器返回的数据格式无效');
-      }
 
       if (!response.ok) {
-        if (response.status === 504) {
-          throw new Error('服务器响应超时，请稍后重试');
-        }
-        throw new Error(data.error || data.details || `请求失败 (${response.status})`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || `请求失败 (${response.status})`);
       }
 
-      if (!data.result) {
-        console.error('无效的响应数据:', data);
-        throw new Error('服务器返回的数据缺少分析结果');
-      }
-
-      setResult(data.result);
-      if (data.usage) {
-        setUsageInfo(data.usage);
-      }
+      // 处理流式响应
+      await handleStream(response);
+      
     } catch (err) {
       console.error('请求错误:', err);
       setError(err instanceof Error ? err.message : '发生未知错误');
@@ -197,18 +194,57 @@ export default function Home() {
 
         {result && (
           <div className="bg-white rounded-lg shadow-lg p-6">
-            <h2 className="text-xl font-semibold mb-4 text-gray-800">分析结果</h2>
-            {usageInfo && (
-              <div className="mb-4 text-sm text-gray-500">
-                消耗令牌: {usageInfo.total_tokens || '未知'}
-              </div>
-            )}
+            <h2 className="text-2xl font-bold mb-6 text-gray-800 text-center">八字分析结果</h2>
             <div className="prose max-w-none">
-              {result.split('\n').map((line, index) => (
-                <p key={index} className="mb-2">
-                  {line}
-                </p>
-              ))}
+              {result.split('\n').map((line, index) => {
+                // 处理标题
+                if (line.startsWith('**') && line.endsWith('**')) {
+                  const title = line.replace(/\*\*/g, '');
+                  if (title.includes('：')) {
+                    return null; // 跳过主标题
+                  }
+                  return (
+                    <h3 key={index} className="text-xl font-semibold mt-8 mb-4 text-blue-800 border-b pb-2">
+                      {title}
+                    </h3>
+                  );
+                }
+                
+                // 处理分隔线
+                if (line.startsWith('---')) {
+                  return <hr key={index} className="my-6 border-gray-200" />;
+                }
+
+                // 处理小标题
+                if (line.startsWith('- **')) {
+                  const subtitle = line.replace(/- \*\*|\*\*/g, '');
+                  return (
+                    <h4 key={index} className="text-lg font-medium mt-4 mb-2 text-blue-700">
+                      {subtitle}
+                    </h4>
+                  );
+                }
+
+                // 处理列表项
+                if (line.startsWith('  ')) {
+                  return (
+                    <p key={index} className="ml-4 mb-2 text-gray-700">
+                      {line.trim()}
+                    </p>
+                  );
+                }
+
+                // 处理普通文本
+                if (line.trim()) {
+                  return (
+                    <p key={index} className="mb-2 text-gray-700">
+                      {line.trim()}
+                    </p>
+                  );
+                }
+
+                return null;
+              })}
             </div>
           </div>
         )}
