@@ -8,6 +8,26 @@
   "env": {
     "OPENAI_API_KEY": {
       "description": "OpenAI API密钥，用于生辰八字分析"
+    },
+    "OPENAI_API_BASE_URL": {
+      "description": "OpenAI API基础URL"
+    },
+    "OPENAI_API_MODEL": {
+      "description": "使用的AI模型名称"
+    },
+    "OPENAI_MAX_TOKENS": {
+      "description": "API响应的最大token数量"
     }
-  }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache"
+        }
+      ]
+    }
+  ]
 } 
