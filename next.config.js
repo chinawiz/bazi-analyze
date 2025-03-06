@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // 配置实验性功能
+  output: 'standalone',
   experimental: {
+    serverActions: true,
     // 禁用Turbopack
     turbo: {
       enabled: false
