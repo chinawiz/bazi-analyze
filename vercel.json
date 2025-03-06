@@ -1,0 +1,13 @@
+{
+  "buildCommand": "npm run build",
+  "devCommand": "npm run dev",
+  "installCommand": "npm install",
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "regions": ["hkg1"],
+  "env": {
+    "OPENAI_API_KEY": {
+      "description": "OpenAI API密钥，用于生辰八字分析"
+    }
+  }
+} 
